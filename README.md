@@ -1,158 +1,163 @@
+
 ## Mimari ve Tasarım Detayları
 
 Bu doküman, sistemin arkasındaki temel tasarım kararlarını ve mimari prensipleri açıklar.
 
-### 1\. Çekirdek Felsefe: Proactive RAG
+### 1\. Çekirdek Felsefe: Proaktif RAG
 
-Geleneksel RAG sistemleri statiktir; veritabanı güncellendiğinde eski cevaplar yanlış kalmaya devam eder. **Proactive RAG**, bu sorunu çözmek için tasarlanmıştır. Sisteme yeni bir doküman eklendiğinde, bu dokümanın içeriği, mevcut tüm **aktif** Prediction görevleriyle anlamsal olarak karşılaştırılır. Eğer bir eşleşme bulunursa, o Prediction görevi yeni bilgiyle yeniden çalıştırılır ve sonucu güncellenir. Bu, sistemin zamanla kendi kendini "iyileştirmesini" ve güncel kalmasını sağlar.
+Geleneksel RAG (Retrieval-Augmented Generation) sistemleri statiktir; veri tabanı güncellendiğinde eski cevaplar yanlış kalmaya devam eder. **Proaktif RAG**, bu sorunu çözmek için tasarlanmıştır. Sisteme yeni bir doküman eklendiğinde:
 
------
+1.  Bu yeni dokümanın içeriği, mevcut tüm **aktif `Prediction`** (bilgi çıkarma görevleri) ile anlamsal olarak karşılaştırılır.
+2.  Eğer anlamlı bir örtüşme bulunursa, ilgili `Prediction` görevi yeni bilgiyle yeniden çalıştırılır ve sonucu güncellenir.
+3.  Bu `Prediction`'a bağlı olan tüm **abone olunmuş (`subscribed`)** kullanıcı sorgularının nihai cevapları da otomatik olarak yeniden oluşturulur.
+
+Bu yaklaşım, sistemin zamanla kendi kendini "iyileştirmesini" ve her zaman güncel kalmasını sağlar.
 
 ### 2\. Maliyet Optimizasyonu: Akıllı Prediction Yeniden Kullanımı
 
-Sistemin en yenilikçi yönlerinden biri, Prediction görevlerini tekrar kullanma şeklidir.
+Sistemin en yenilikçi yönlerinden biri, maliyet ve gecikmeyi azaltmak için mevcut `Prediction` görevlerini akıllıca yeniden kullanmasıdır.
 
 **Akış:**
 
-1.  Bir kullanıcı sorgusu geldiğinde, sistem veritabanında "kör" bir arama yapmaz.
-2.  Önce, sorgunun anlamsal vektörünü oluşturur ve bunu ChromaDB'deki `predictions` koleksiyonunda aratarak anlamsal olarak en benzer mevcut görevleri bulur.
-3.  Bu "aday" görevler, yalnızca **`FULFILLED` (aktif)** durumundakiler arasından seçilir. Bu, sistemin eski veya alakasız görevleri dikkate almasını engeller.
-4.  Bu adaylar, ana LLM'e (GPT-4) kullanıcı sorgusuyla birlikte sunulur.
-5.  LLM, bir "düşünür" rolü üstlenir: "Bu yeni sorguyu cevaplamak için bu aktif adaylardan birini kullanabilir miyim, yoksa tamamen yeni bir görev mi oluşturmalıyım?"
-6.  Bu proaktif kontrol, anlamsal olarak aynı olan görevlerin tekrar tekrar oluşturulmasını ve çalıştırılmasını engelleyerek **maliyetleri ve gecikmeyi önemli ölçüde azaltır**.
-    Yeni oluşturulan her Prediction da gelecekteki aramalar için `predictions` vektör koleksiyonuna eklenir, böylece sistem sürekli olarak öğrenir.
+1.  Yeni bir kullanıcı sorgusu geldiğinde, sistem önce sorgunun anlamsal bir vektörünü oluşturur.
+2.  Bu vektörü kullanarak ChromaDB'deki `predictions` koleksiyonunda anlamsal olarak en benzer mevcut görevleri bulur.
+3.  Bu "aday" görevler, ana LLM'e (örn. GPT-4) kullanıcı sorgusuyla birlikte sunulur.
+4.  LLM, bir "sistem mimarı" rolü üstlenir ve şu kararı verir: "Bu yeni sorguyu cevaplamak için mevcut adaylardan birini yeniden kullanabilir miyim, yoksa tamamen yeni bir `Prediction` görevi mi oluşturmalıyım?"
+5.  Bu proaktif kontrol, anlamsal olarak aynı olan görevlerin tekrar tekrar oluşturulmasını ve çalıştırılmasını engelleyerek **maliyetleri ve gecikmeyi önemli ölçüde azaltır**.
 
------
+### 3\. Veri İşleme Stratejisi
 
-### 3\. Veri İşleme: Bağlam Bütünlüğü Stratejisi
+Sistem, RAG ve güncelleme tespiti için dokümanların içeriğini değil, **anlam açısından zengin meta verilerini** kullanır:
 
-Anlamsal aramanın kalitesi, vektör veritabanına eklenen "chunk"ların (parçacıkların) kalitesine bağlıdır. Bağlamın kaybolmasını önlemek için hibrit bir strateji izlenir:
-
-  * **Bağlam Zenginleştirme:** Her bir doküman parçacığının (chunk) başına, ait olduğu dokümanın `title` ve `summary` gibi meta verileri eklenir. Bu, her chunk'ın kendi başına daha anlamlı olmasını sağlar.
-  * **Chunk Overlap (Parça Kesişimi):** Metin, langchain'in `RecursiveCharacterTextSplitter`'ı kullanılarak, parçalar arasında bir miktar metin ortak kalacak şekilde bölünür. Bu, bir cümlenin veya fikrin iki chunk arasında bölünerek anlamını yitirmesini engeller.
-
------
+  * **Meta Veri Odaklı Vektörleştirme**: Bir doküman sisteme eklendiğinde, `özeti (summary)`, `anahtar kelimeleri (keywords)` gibi meta verileri vektörleştirilerek ChromaDB'ye eklenir.
+  * **Bağlam Sağlama**: Bir `Prediction` görevi için bağlam gerektiğinde, bu meta veri vektörleri üzerinden en alakalı dokümanlar bulunur ve LLM'e bu dokümanların **tam içeriği** sağlanır.
 
 ### 4\. Veritabanı Mimarisi ve Şeması
 
-Sistem, yapısal veriler için **PostgreSQL** ve anlamsal vektör verileri için **ChromaDB** olmak üzere iki temel veritabanı üzerine kuruludur. Bu hibrit yaklaşım, hem ilişkisel veri bütünlüğünü hem de yüksek performanslı anlamsal aramayı mümkün kılar.
+Sistem, yapısal veriler için **PostgreSQL** ve anlamsal vektör verileri için **ChromaDB** olmak üzere iki temel veritabanı üzerine kuruludur.
 
 #### PostgreSQL: İlişkisel Veri Deposu
 
-Uygulamanın çekirdek nesneleri, durumları ve ilişkileri burada yönetilir.
-
 ```mermaid
 erDiagram
-    UserQuery ||--o{ AnswerTemplate : "has one"
-    AnswerTemplate ||--|{ TemplatePredictionsLink : "is composed of"
-    TemplatePredictionsLink }|--|| Prediction : "links to"
-    Document ||--|{ Prediction : "can be source for (implicit)"
-
     UserQuery {
         int id PK
         string query_text
         bool is_subscribed
-        datetime created_at
-    }
-    AnswerTemplate {
-        int id PK
-        int query_id FK
-        string template_text
+        string language
+        json answer_template_text
+        string final_answer
+        datetime answer_last_updated
     }
     Prediction {
         int id PK
-        string prediction_prompt
+        string prediction_prompt UK
         json predicted_value
         string status
         datetime last_updated
-        json entities
-        json events
         json keywords
-        string summary
+        string base_language_code
     }
     TemplatePredictionsLink {
         int id PK
-        int template_id FK
+        int query_id FK
         int prediction_id FK
         string placeholder_name
     }
     Document {
         int id PK
-        string source_url
+        string source_url UK
         datetime publication_date
         string raw_markdown_content
     }
-```
 
------
+    UserQuery ||--|{ TemplatePredictionsLink : "links to"
+    Prediction ||--|{ TemplatePredictionsLink : "is linked by"
+```
 
 #### ChromaDB: Vektör Veri Deposu
 
-Anlamsal arama ve benzerlik tespiti için kullanılır. İki ana koleksiyondan oluşur:
-
-  * **`documents` Koleksiyonu**: Doküman meta verilerinin (özet, anahtar kelimeler, varlıklar) anlamsal vektörlerini barındırır. Bir `Prediction` için ilgili bağlamı bulmak (RAG) amacıyla kullanılır.
-  * **`predictions` Koleksiyonu**: `Prediction` prompt'larının ve meta verilerinin vektörlerini içerir. Yeni bir sorgu geldiğinde yeniden kullanılabilecek görevleri bulmak amacıyla kullanılır.
-
------
+  * **`documents` Koleksiyonu**: Doküman meta verilerinin (özet, anahtar kelimeler) anlamsal vektörlerini barındırır.
+  * **`predictions` Koleksiyonu**: `Prediction` prompt'larının ve anahtar kelimelerinin vektörlerini içerir.
 
 ### 5\. Prediction Yaşam Döngüsü ve Durum Yönetimi
 
-Bir `Prediction` objesi, sistemde açıkça tanımlanmış bir yaşam döngüsüne sahiptir. Bu döngü, `status` alanı ile yönetilir ve sistemin verimli çalışmasını sağlar.
+Bir `Prediction` objesi, `status` alanı ile yönetilen bir yaşam döngüsüne sahiptir.
 
-  * **`PENDING` (Beklemede):** Görev tanımlandı ancak henüz çalıştırılmadı.
   * **`FULFILLED` (Tamamlandı/Aktif):** Görev çalıştırıldı, bir sonuca sahip ve yeniden kullanıma ve reaktif güncellemelere açık.
-  * **`INACTIVE` (Pasif):** Görev artık aktif bir sorgu tarafından kullanılmıyor ve "emekliye ayrıldı". Güncellenmez veya yeniden kullanılmaz.
+  * **`PENDING` (Beklemede):** Görev tanımlandı ancak henüz çalıştırılmadı.
+  * **`INACTIVE` (Pasif):** Görev artık aktif bir sorgu tarafından kullanılmıyor.
 
------
+### 6\. Sorgu Abonelik Modeli ve Proaktif Bildirimler 🔔
 
-### 6\. Desteklenen Kullanıcı Sorgu Tipleri
+Sistemin proaktif yeteneklerinin merkezinde **sorgu abonelik modeli** yer alır.
 
-Sistemin yetenekleri, sabit bir komut listesiyle değil, kendisine yüklenen dokümanların içeriğiyle belirlenir. Kullanıcıların yöneltebileceği sorguları, amaçlarına ve gerektirdikleri akıl yürütme seviyesine göre şu şekilde sınıflandırabiliriz:
+  * **Abonelik Durumu**: Her `UserQuery` kaydı, varsayılan olarak `True` (abone) olan bir `is_subscribed` boole alanı içerir.
+  * **Kontrollü Güncellemeler**: Bir `Prediction` güncellendiğinde, sistem **sadece `is_subscribed = True` olan** `UserQuery` kayıtlarının `final_answer` alanını yeniden hesaplar.
+  * **Verimlilik ve Esneklik**: Bu model, bir kullanıcı veya sistemin artık canlı güncelleme gerektirmeyen bir sorgunun aboneliğinden çıkmasına olanak tanır (`update_user_query_subscription` fonksiyonu ile).
+  * **Bildirim Mekanizması**: `src/answer_monitor.py` modülü, bu modelle doğrudan entegre çalışır. Harici bir servis, `get_updated_answers_since` fonksiyonunu kullanarak belirli bir zamandan beri güncellenmiş ve **abone olunmuş** cevapları periyodik olarak sorgulayabilir.
+
+#### Abonelik Akışının Sıra Diyagramı
+
+Aşağıdaki diyagram, yeni bir doküman geldiğinde bir abone sorgusunun nasıl proaktif olarak güncellendiğini göstermektedir.
+
+```mermaid
+sequenceDiagram
+    participant Actor as Harici Aktör
+    participant Core as core_logic.py
+    participant VStore as vector_store.py
+    participant LLM_GW as llm_gateway.py
+    participant DB as PostgreSQL
+    participant Monitor as answer_monitor.py
+
+    Actor->>Core: handle_new_document(filePath)
+    note over Core: Dokümanı DB'ye ve VStore'a kaydeder.
+
+    Core->>VStore: find_similar_predictions(docMeta)
+    VStore-->>Core: İlgili Prediction ID'leri
+
+    Core->>DB: Prediction nesnelerini getir
+    DB-->>Core: Prediction nesneleri
+
+    loop Her ilgili Prediction için
+        Core->>LLM_GW: update_prediction(prompt, eskiDeğer, yeniİçerik)
+        LLM_GW-->>Core: Sonuç: {status: "update", data: ...}
+        
+        alt status == "update"
+            Core->>DB: Prediction'ı güncelle
+            note over Core, DB: Bu aşama reaktif akışı tetikler.
+        end
+    end
+
+    Core->>DB: Güncellenen Prediction'lara bağlı<br>abone (subscribed) sorguları bul
+    DB-->>Core: UserQuery nesneleri
+
+    loop Her abone UserQuery için
+        Core->>Core: _assemble_final_answer(query)
+        note right of Core: Gerekirse LLM_GW aracılığıyla<br>yeni çeviri yapılır.
+        Core->>DB: UserQuery.final_answer ve<br>UserQuery.answer_last_updated'i güncelle
+    end
+
+    Actor->>Monitor: get_updated_answers_since(lastCheck)
+    Monitor->>DB: Belirtilen zamandan sonra güncellenen<br>abone sorguları getir
+    DB-->>Monitor: Güncel cevap listesi
+    Monitor-->>Actor: Güncel cevap listesi
+```
+
+### 7\. Desteklenen Kullanıcı Sorgu Tipleri
 
 #### Olgusal Sorgular (Factual Queries) 📖
 
-Dokümanlarda var olan gerçek bilgileri çıkarmayı hedefler.
-
-  * **Doğrudan Veri Çıkarımı:** Net, tekil bir bilgiyi bulur.
-      * `"Yasa değişikliği hangi tarihte yasalaştı?"`
-  * **Tanımlayıcı Sorgular:** Bir kavramın ne olduğunu açıklar.
-      * `"Reaktif RAG ne demektir?"`
-  * **Özetleyici Sorgular:** Uzun bir metnin ana fikirlerini yoğunlaştırır.
-      * `"Yeni kanun teklifinin ana maddelerini özetle."`
+  * **Örnek:** `"İmar hakkı aktarımı nedir?"`
 
 #### Çıkarımsal Sorgular (Inferential Queries) 🧠
 
-Farklı bilgi parçacıklarını birleştirerek mantıksal bir çıkarım veya sentez yapılmasını gerektirir.
-
-  * **İlişkisel Akıl Yürütme:** Olaylar arasında neden-sonuç ilişkisi kurar.
-      * `"Yeni vergi düzenlemesinin şirketin kâr marjı üzerindeki etkisi ne oldu?"`
-  * **Karşılaştırmalı Analiz:** İki veya daha fazla unsuru kıyaslar.
-      * `"İmar hakkı aktarımı ile klasik kamulaştırma arasındaki avantaj ve dezavantajları karşılaştır."`
-  * **Çok Adımlı Sorgular (Multi-Hop):** Cevap için birden fazla bilginin bulunup birleştirilmesini gerektirir.
-      * `"Pazarlama departmanının başındaki yöneticinin daha önce yönettiği en başarılı projenin adı neydi?"`
+  * **Örnek:** `"İmar hakkı aktarımı ile klasik kamulaştırma arasındaki avantajları karşılaştır."`
 
 #### Prosedürel Sorgular (Procedural Queries) 📋
 
-Bir işin veya sürecin "nasıl yapılacağını" adım adım öğrenmeyi amaçlar.
+  * **Örnek:** `"İmar hakkı aktarımı için başvuru süreci hangi adımları içerir?"`
 
-  * `"İmar hakkı aktarımı için başvuru süreci hangi adımları içerir?"`
-  * `"Bir şirkette iç denetim raporu nasıl hazırlanır?"`
+### 8\. Uçtan Uca Simülasyon (`run_full_test.py`)
 
-#### Hipotetik Sorgular (Hypothetical Queries) ❌
-
-Varsayımsal senaryoları sorgular. Sistem, bir simülatör olmadığı için bu tür soruları cevaplayamaz; sadece dokümanlardaki gerçekleri raporlar.
-
-  * `"Eğer yasa teklifi meclisten geçmeseydi ne olurdu?"`
-  * `"Şirket, Y projesine hiç başlamasaydı bugünkü finansal durumu nasıl olurdu?"`
-
------
-
-### 7\. Uçtan Uca Simülasyon
-
-Bu bölüm, sistemin nasıl çalıştığını adım adım gösterir.
-
-1.  **Kurulum:** `docker-compose up -d` ile veritabanını başlatın ve `python scripts/reset_database.py` ile sıfırlayın.
-2.  **Veri Yükleme:** `python scripts/ingest_folder.py` ile sisteme bilgi içeren dokümanları yükleyin.
-3.  **İlk Sorgu:** `python scripts/query.py query --text "..."` ile bir soru sorun. Sistem, yeniden kullanılacak görev bulamaz, yeni `Prediction`'lar oluşturur, bunları RAG ile doldurur ve cevabı sentezler.
-4.  **Benzer Sorgu:** Anlamsal olarak benzer ikinci bir soru sorun. Sistem bu kez mevcut `Prediction`'ları yeniden kullanarak (`reuse`) çok daha hızlı ve az maliyetli bir cevap üretir.
-5.  **Reaktif Güncelleme:** Sisteme mevcut bilgiyi değiştiren yeni bir doküman yükleyin. Sistem, bu yeni bilginin hangi `Prediction`'ları etkilediğini tespit eder, onları otomatik olarak yeniden çalıştırır ve böylece o `Prediction`'lara bağlı tüm eski sorguların cevaplarını proaktif olarak günceller.
+Test betiği, sistemin nasıl çalıştığını adım adım gösterir: sıfırlama, veri yükleme, ilk sorgu, reaktif güncelleme testi ve doğrulama. Bu simülasyon, abone olunmuş sorguların yeni bilgiyle otomatik olarak nasıl güncellendiğini kanıtlar.
