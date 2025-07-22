@@ -11,7 +11,6 @@ class LLMGateway:
         self.client = OpenAI(api_key=config.OPENAI_API_KEY)
         logger.info("OpenAI client initialized.")
 
-    # YENİ FONKSİYON 1: ANALİST
     def decompose_query_into_tasks(self, user_query: str) -> Dict[str, Any]:
         """
         Kullanıcının sorgusunu analiz eder ve onu bir veya daha fazla atomik,
@@ -28,7 +27,7 @@ class LLMGateway:
         YOUR TASK:
         1.  **DETECT LANGUAGE**: Identify the language of the user's query (e.g., "tr", "en").
         2.  **IDENTIFY CORE TASKS**: Analyze the user's query to understand the underlying information needed.
-        3.  **GENERATE TASK PROMPTS**: For each piece of information needed, create a clear, machine-readable "prediction_prompt" in ENGLISH. Each prompt should ask for one specific piece of data. Also, generate relevant "keywords" for each prompt.
+        3.  **GENERATE TASK PROMPTS**: For each piece of information needed, create a clear, machine-readable `prediction_prompt` in ENGLISH. Each prompt must be a self-contained, reusable command or question. Also, generate relevant `keywords` for each prompt.
         4.  **OUTPUT JSON**: Your output MUST be a single, valid JSON object.
 
         EXAMPLE:
@@ -51,16 +50,20 @@ class LLMGateway:
         """
         try:
             response = self.client.chat.completions.create(
-                model=config.DECOMPOSER_MODEL, # Or a faster model for this simple task
+                model=config.DECOMPOSER_MODEL,
                 messages=[{"role": "system", "content": meta_prompt}],
                 response_format={"type": "json_object"}
             )
-            return json.loads(response.choices[0].message.content)
+            analysis_result = json.loads(response.choices[0].message.content)
+            # Analiz sonucunu, daha sonra orkestratörde dili bulmak için task'lere ekleyelim
+            if 'potential_tasks' in analysis_result:
+                for task in analysis_result['potential_tasks']:
+                    task['__parent_analysis__'] = {'user_language_code': analysis_result.get('user_language_code')}
+            return analysis_result
         except Exception as e:
             logger.error(f"Error during query task decomposition: {e}", exc_info=True)
             return {"user_language_code": "en", "potential_tasks": []}
 
-    # YENİ FONKSİYON 2: ORKESTRATÖR
     def orchestrate_tasks_and_plan(self, user_query: str, potential_tasks: List[Dict], candidates_map: Dict[str, List[Dict]]) -> Dict[str, Any]:
         """
         Gereken görevleri, mevcut aday Prediction'ları ve orijinal sorguyu alarak
@@ -78,6 +81,7 @@ class LLMGateway:
             else:
                 candidates_text += "  - No existing predictions found. A new one must be created.\n"
 
+
         meta_prompt = f"""
         ROLE:
         You are an expert system orchestrator. Your job is to create a final execution plan to answer a user's query, using a list of required tasks and a list of available, pre-existing data points (Predictions).
@@ -91,18 +95,22 @@ class LLMGateway:
         AVAILABLE PRE-EXISTING DATA (CANDIDATE PREDICTIONS):
         {candidates_text}
 
-        YOUR TASK:
-        1.  **CREATE RENDER PLAN**: Based on the ORIGINAL USER QUERY, create a `render_plan` in the user's language to display the final answer attractively. Use placeholders for each required task.
-        2.  **CREATE FINAL PREDICTION LIST**: Iterate through the REQUIRED TASKS. For each task:
-            a. Look at the AVAILABLE PRE-EXISTING DATA. If you find a candidate whose prompt is a very close semantic match for the required task, decide to REUSE it. Use its ID.
-            b. If no suitable candidate is found, decide to CREATE a NEW prediction. Use the required task's prompt and keywords.
-        3.  **OUTPUT JSON**: Your output MUST be a single, valid JSON object containing the `render_plan` and the final `predictions` list. The predictions list should specify `reuse_prediction_id` for reused tasks, and `new_prediction_prompt` for new ones. Use the placeholder names from your render plan.
+        YOUR REASONING PROCESS (Follow these steps internally before generating the final JSON):
+        1.  **Review the Goal:** Look at the ORIGINAL USER QUERY to understand the user's overall intent and language for the response.
+        2.  **Map Tasks to Data:** For each task in REQUIRED TASKS, examine the AVAILABLE PRE-EXISTING DATA.
+            - If there is an available candidate with a prompt that is a clear and direct semantic match for the required task, mark it for **reuse**.
+            - If there are no candidates or the candidates are not a good match, mark the task for **creation**.
+        3.  **Plan the Output:** Based on your decisions, plan the final `render_plan` and `predictions` list. Ensure every placeholder in the `render_plan` corresponds to a task in the `predictions` list.
+
+        FINAL OUTPUT (Produce ONLY the following JSON object based on your reasoning):
+        - A `render_plan` to structure the answer in the user's language.
+        - A `predictions` list detailing whether to `reuse_prediction_id` or create a `new_prediction_prompt` for each placeholder.
 
         EXAMPLE OUTPUT:
         {{
           "render_plan": [
-             {{ "type": "paragraph", "content": "Türkiye'nin başkenti {capital_city} şehridir." }},
-             {{ "type": "paragraph", "content": "Bu şehrin nüfusu yaklaşık {capital_population} kişidir." }}
+             {{ "type": "paragraph", "content": "Türkiye'nin başkenti {{capital_city}} şehridir." }},
+             {{ "type": "paragraph", "content": "Bu şehrin nüfusu yaklaşık {{capital_population}} kişidir." }}
           ],
           "predictions": [
             {{
@@ -123,18 +131,21 @@ class LLMGateway:
                 messages=[{"role": "system", "content": meta_prompt}],
                 response_format={"type": "json_object"}
             )
-            # Add user_language_code to the final output for handle_new_query
             final_plan = json.loads(response.choices[0].message.content)
-            final_plan['user_language_code'] = potential_tasks[0].get('user_language_code', 'en') if potential_tasks else 'en'
+            
+            # Analiz adımından gelen dili nihai plana ekle
+            user_language_code = "en"
+            if potential_tasks and '__parent_analysis__' in potential_tasks[0]:
+                user_language_code = potential_tasks[0]['__parent_analysis__'].get('user_language_code', 'en')
+            
+            final_plan['user_language_code'] = user_language_code
             return final_plan
 
         except Exception as e:
             logger.error(f"Error during plan orchestration: {e}", exc_info=True)
-            return {"render_plan": [], "predictions": []}
+            return {{"render_plan": [], "predictions": [], "user_language_code": "en"}}
 
-    # --- Diğer fonksiyonlar (fulfill_prediction, translate_value, update_prediction) aynı kalır ---
     def fulfill_prediction(self, prediction_prompt: str, context_chunks: List[str]) -> Dict[str, Any]:
-        # Bu fonksiyonun içeriği değişmedi
         logger.info(f"Fulfilling prediction... Model: {config.WORKER_MODEL}")
         context_str = "\n---\n".join(context_chunks)
         rag_prompt = f"""
@@ -202,7 +213,6 @@ class LLMGateway:
             return {"error": "translation_failed", "message": f"Could not translate to {target_language_code}"}
 
     def update_prediction(self, prediction_prompt: str, current_value_content: Any, new_context_chunks: List[str],base_language: str = "en") -> Dict[str, Any]:
-        # Bu fonksiyonun içeriği değişmedi
         logger.info(f"Incrementally updating prediction... Model: {config.WORKER_MODEL}")
         new_context_str = "\n---\n".join(new_context_chunks)
         current_value_str = json.dumps(current_value_content, ensure_ascii=False, indent=2)

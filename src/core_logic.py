@@ -253,123 +253,114 @@ def handle_new_document(file_path: str):
         db.rollback()
     finally:
         db.close()
-
-def handle_new_query(query_text: str) -> int | None:
-    """
-    Yeni bir kullanıcı sorgusunu "Analist-Orkestratör" mimarisiyle işler.
-    """
-    logger.info(f"Handling new query with two-stage architecture: '{query_text}'")
-    db: Session = next(get_db())
-    try:
-        # AŞAMA 1: ANALİZ - Sorguyu atomik görevlere ayır
-        analysis = llm_gateway.decompose_query_into_tasks(query_text)
-        potential_tasks = analysis.get("potential_tasks", [])
-        user_lang = analysis.get("user_language_code", "en")
-
-        if not potential_tasks:
-            logger.error("LLM Analyst failed to decompose query into tasks.")
-            return None
-
-        # AŞAMA 2: ADAY TESPİTİ - Her görev için mevcut Prediction'ları ara
-        candidates_map = {}
-        SEMANTIC_MATCH_THRESHOLD = 0.85 # Aday bulmak için biraz daha esnek bir eşik
         
-        for task in potential_tasks:
-            prompt = task['prompt']
-            keywords = task['keywords']
-            
-            candidate_ids = vector_store.find_similar_predictions(prompt, keywords, top_k=3)
-            if not candidate_ids:
-                candidates_map[prompt] = []
-                continue
+def _process_query_logic(db: Session, user_query: UserQuery):
+    """
+    Bir UserQuery objesi alır ve Analist-Orkestratör mantığını çalıştırarak
+    cevabı oluşturur ve veritabanını günceller. Hem yeni hem de güncellenen
+    sorgular için ortak mantığı içerir.
+    """
+    query_text = user_query.query_text
 
+    # AŞAMA 1: ANALİZ
+    analysis = llm_gateway.decompose_query_into_tasks(query_text)
+    potential_tasks = analysis.get("potential_tasks", [])
+    user_lang = analysis.get("user_language_code", "en")
+    user_query.language = user_lang 
+
+    if not potential_tasks:
+        raise ValueError("LLM Analyst failed to decompose query into tasks.")
+
+    # AŞAMA 2: ADAY TESPİTİ
+    candidates_map = {}
+    SEMANTIC_MATCH_THRESHOLD = 0.85
+    for task in potential_tasks:
+        prompt = task['prompt']
+        keywords = task['keywords']
+        candidate_ids = vector_store.find_similar_predictions(prompt, keywords, top_k=3)
+        if candidate_ids:
             candidates = db.query(Prediction).filter(Prediction.id.in_(candidate_ids)).all()
-            
-            # Yüksek benzerliğe sahip adayları filtrele
             strong_candidates = []
             for cand in candidates:
                 similarity = get_cosine_similarity(prompt, cand.prediction_prompt)
                 if similarity >= SEMANTIC_MATCH_THRESHOLD:
                     strong_candidates.append({"id": cand.id, "prompt": cand.prediction_prompt})
-            
             candidates_map[prompt] = strong_candidates
+        else:
+            candidates_map[prompt] = []
 
-        # AŞAMA 3: ORKESTRASYON - Nihai plan için LLM'e danış
-        decomposition = llm_gateway.orchestrate_tasks_and_plan(query_text, potential_tasks, candidates_map)
-        render_plan = decomposition.get('render_plan', []) 
-        prediction_specs = decomposition.get('predictions', [])
+    # AŞAMA 3: ORKESTRASYON
+    decomposition = llm_gateway.orchestrate_tasks_and_plan(query_text, potential_tasks, candidates_map)
+    render_plan = decomposition.get('render_plan', [])
+    prediction_specs = decomposition.get('predictions', [])
 
-        if not render_plan or not prediction_specs:
-            logger.error("LLM Orchestrator failed to create a final plan.")
-            return None
+    if not render_plan or not prediction_specs:
+        raise ValueError("LLM Orchestrator failed to create a final plan.")
 
-        # AŞAMA 4: PLANI UYGULAMA
-        # UserQuery kaydını oluştur
-        user_query = UserQuery(
-            query_text=query_text, 
-            language=user_lang, 
-            answer_template_text=render_plan, 
-            is_subscribed=True
-        )
+    user_query.answer_template_text = render_plan
+
+    # AŞAMA 4: PLANI UYGULAMA
+    for spec in prediction_specs:
+        placeholder = spec['placeholder_name']
+        prediction = None
+        if "reuse_prediction_id" in spec:
+            prediction = db.query(Prediction).get(spec["reuse_prediction_id"])
+        
+        elif "new_prediction_prompt" in spec:
+            prompt = spec["new_prediction_prompt"]
+            keywords = spec.get("keywords", [])
+            
+            context_hits = vector_store.query_document_metas(prompt, keywords, n_results=5)
+            if context_hits:
+                context_texts = [h['text'] for h in context_hits]
+                llm_output = llm_gateway.fulfill_prediction(prompt, context_texts)
+            else:
+                llm_output = {"is_translatable": False, "data": {"error": "not_found", "message": "Kaynak dokümanlarda bilgi bulunamadı."}}
+            
+            new_value = {
+                "is_translatable": llm_output.get("is_translatable", False),
+                "content": {user_lang: llm_output.get("data")}
+            }
+            
+            # Prediction objesi, isimlendirilmiş argümanlarla (keyword arguments) oluşturuldu.
+            prediction = Prediction(
+                prediction_prompt=prompt,
+                predicted_value=new_value,
+                base_language_code=user_lang,
+                keywords=keywords,
+                status="FULFILLED",
+                last_updated=datetime.now(timezone.utc)
+            )
+            db.add(prediction)
+            db.commit()
+            db.refresh(prediction)
+            vector_store.add_prediction_meta(prediction.id, "prompt_text", prompt, create_embedding(prompt))
+            for kw in keywords:
+                if kw:
+                    vector_store.add_prediction_meta(prediction.id, "keyword", kw, create_embedding(kw))
+
+        if prediction:
+            db.add(TemplatePredictionsLink(query_id=user_query.id, prediction_id=prediction.id, placeholder_name=placeholder))
+
+    db.commit()
+    db.refresh(user_query, ['predictions'])
+
+    # AŞAMA 5: CEVABI BİRLEŞTİR
+    user_query.final_answer = _assemble_final_answer(db, user_query)
+    user_query.answer_last_updated = datetime.now(timezone.utc)
+    db.commit()
+
+def handle_new_query(query_text: str) -> int | None:
+    """Yeni bir kullanıcı sorgusu oluşturur ve işler."""
+    logger.info(f"Handling new query: '{query_text}'")
+    db: Session = next(get_db())
+    try:
+        user_query = UserQuery(query_text=query_text, is_subscribed=True)
         db.add(user_query)
         db.commit()
         db.refresh(user_query)
-
-        # Orkestratörün kararlarına göre Prediction'ları bul veya oluştur
-        for spec in prediction_specs:
-            placeholder = spec['placeholder_name']
-            prediction = None
-            if "reuse_prediction_id" in spec:
-                prediction = db.query(Prediction).get(spec["reuse_prediction_id"])
-                logger.info(f"Orchestrator decided to reuse Prediction ID: {spec['reuse_prediction_id']}")
-            
-            elif "new_prediction_prompt" in spec:
-                logger.info("Orchestrator decided to create a new Prediction.")
-                prompt = spec["new_prediction_prompt"]
-                keywords = spec.get("keywords", [])
-                
-                context_hits = vector_store.query_document_metas(prompt, keywords, n_results=5)
-                if context_hits:
-                    context_texts = [h['text'] for h in context_hits]
-                    llm_output = llm_gateway.fulfill_prediction(prompt, context_texts)
-                else:
-                    llm_output = {"is_translatable": False, "data": {"error": "not_found"}}
-                
-                new_value = {
-                    "is_translatable": llm_output.get("is_translatable", False),
-                    "content": {user_lang: llm_output.get("data")}
-                }
-                
-                prediction = Prediction(
-                    prediction_prompt=prompt,
-                    predicted_value=new_value,
-                    base_language_code=user_lang,
-                    keywords=keywords,
-                    status="FULFILLED",
-                    last_updated=datetime.now(timezone.utc)
-                )
-                db.add(prediction)
-                db.commit()
-                db.refresh(prediction)
-                vector_store.add_prediction_meta(prediction.id, "prompt_text", prompt, create_embedding(prompt))
-                for kw in keywords:
-                    if kw:
-                        vector_store.add_prediction_meta(prediction.id, "keyword", kw, create_embedding(kw))
-
-            if prediction:
-                db.add(TemplatePredictionsLink(
-                    query_id=user_query.id,
-                    prediction_id=prediction.id,
-                    placeholder_name=placeholder
-                ))
         
-        db.commit()
-        db.refresh(user_query, ['predictions'])
-
-        # AŞAMA 5: CEVABI BİRLEŞTİR
-        user_query.final_answer = _assemble_final_answer(db, user_query)
-        user_query.answer_last_updated = datetime.now(timezone.utc)
-        db.commit()
+        _process_query_logic(db, user_query)
 
         print(f"\n--- NİHAİ CEVAP (ID: {user_query.id}) ---\n{user_query.final_answer}\n-----------------------\n")
         return user_query.id
@@ -379,7 +370,37 @@ def handle_new_query(query_text: str) -> int | None:
         return None
     finally:
         db.close()
+
+def update_query_text(query_id: int, new_query_text: str) -> int | None:
+    """Mevcut bir sorgunun metnini günceller ve tüm süreci yeniden çalıştırır."""
+    logger.info(f"Updating UserQuery ID {query_id} with new text: '{new_query_text}'")
+    db: Session = next(get_db())
+    try:
+        user_query = db.query(UserQuery).filter(UserQuery.id == query_id).first()
+        if not user_query:
+            logger.warning(f"Update failed: UserQuery ID {query_id} not found.")
+            return None
         
+        # 1. Eski bağlantıları temizle
+        db.query(TemplatePredictionsLink).filter(TemplatePredictionsLink.query_id == query_id).delete(synchronize_session=False)
+        
+        # 2. Sorgu metnini güncelle
+        user_query.query_text = new_query_text
+        db.commit()
+        db.refresh(user_query)
+
+        # 3. Ana mantığı güncellenmiş obje ile yeniden çalıştır
+        _process_query_logic(db, user_query)
+
+        print(f"\n--- GÜNCELLENMİŞ CEVAP (ID: {user_query.id}) ---\n{user_query.final_answer}\n-----------------------\n")
+        return user_query.id
+    except Exception as e:
+        logger.error(f"Error updating query ID {query_id}: {e}", exc_info=True)
+        db.rollback()
+        return None
+    finally:
+        db.close()
+
 def update_user_query_subscription(query_id: int, subscribe: bool):
     """Kullanıcının bir sorgu için güncelleme aboneliğini değiştirir."""
     db: Session = next(get_db())
