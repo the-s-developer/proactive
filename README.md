@@ -102,8 +102,8 @@ Sistemin proaktif yeteneklerinin merkezinde **sorgu abonelik modeli** yer alır.
 Aşağıdaki diyagram, yeni bir doküman geldiğinde bir abone sorgusunun nasıl proaktif olarak güncellendiğini göstermektedir.
 
 ```mermaid
-sequenceDiagram
-    participant Actor as Harici Aktor
+ sequenceDiagram
+    participant Actor as External Actor
     participant Core as core_logic.py
     participant VStore as vector_store.py
     participant LLM_GW as llm_gateway.py
@@ -111,37 +111,37 @@ sequenceDiagram
     participant Monitor as answer_monitor.py
 
     Actor->>Core: handle_new_document(filePath)
-    note over Core: Dokuman DB'ye ve VStore'a kaydedilir.
+    note over Core: Document is saved to DB and VStore.
 
     Core->>VStore: find_similar_predictions(docMeta)
-    VStore-->>Core: Ilgili Prediction ID'leri
+    VStore-->>Core: Relevant Prediction IDs
 
-    Core->>DB: Prediction nesnelerini getir
-    DB-->>Core: Prediction nesneleri
+    Core->>DB: Fetch Prediction objects
+    DB-->>Core: Prediction objects
 
-    loop Her ilgili Prediction icin
-        Core->>LLM_GW: update_prediction(prompt, eskiDeger, yeniIcerik)
-        LLM_GW-->>Core: Guncelleme Sonucu (JSON)
+    loop For each relevant Prediction
+        Core->>LLM_GW: update_prediction(prompt, oldValue, newContent)
+        LLM_GW-->>Core: Update Result (JSON)
         
         alt status == "update"
-            Core->>DB: Prediction'i guncelle
-            note over Core, DB: Bu adim reaktif akisi tetikler.
+            Core->>DB: Update Prediction
+            note over Core, DB: This step triggers the reactive flow.
         end
     end
 
-    Core->>DB: Guncellenen Prediction'lara bagli<br>abone sorgulari bul
-    DB-->>Core: UserQuery nesneleri
+    Core->>DB: Find subscribed queries linked<br>to updated Predictions
+    DB-->>Core: UserQuery objects
 
-    loop Her abone UserQuery icin
+    loop For each subscribed UserQuery
         Core->>Core: _assemble_final_answer(query)
-        note right of Core: Gerekirse LLM_GW ile<br>yeni ceviri yapilir.
-        Core->>DB: UserQuery'nin final_answer'ini guncelle
+        note right of Core: If needed, a new translation<br>is done via LLM_GW.
+        Core->>DB: Update the UserQuery's final_answer
     end
 
     Actor->>Monitor: get_updated_answers_since(lastCheck)
-    Monitor->>DB: Guncellenen abone sorgularini getir
-    DB-->>Monitor: Guncel cevaplar
-    Monitor-->>Actor: Guncel cevaplar
+    Monitor->>DB: Fetch updated subscribed queries
+    DB-->>Monitor: Updated answers
+    Monitor-->>Actor: Updated answers
 ```
 
 ### 7\. Desteklenen Kullanıcı Sorgu Tipleri
