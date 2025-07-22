@@ -103,7 +103,7 @@ Aşağıdaki diyagram, yeni bir doküman geldiğinde bir abone sorgusunun nasıl
 
 ```mermaid
 sequenceDiagram
-    participant Actor as Harici Aktör
+    participant Actor as Harici Aktor
     participant Core as core_logic.py
     participant VStore as vector_store.py
     participant LLM_GW as llm_gateway.py
@@ -111,37 +111,37 @@ sequenceDiagram
     participant Monitor as answer_monitor.py
 
     Actor->>Core: handle_new_document(filePath)
-    note over Core: Dokümanı DB'ye ve VStore'a kaydeder.
+    note over Core: Dokumani DB'ye ve VStore'a kaydeder.
 
     Core->>VStore: find_similar_predictions(docMeta)
-    VStore-->>Core: İlgili Prediction ID'leri
+    VStore-->>Core: Ilgili Prediction ID'leri
 
     Core->>DB: Prediction nesnelerini getir
     DB-->>Core: Prediction nesneleri
 
-    loop Her ilgili Prediction için
-        Core->>LLM_GW: update_prediction(prompt, eskiDeğer, yeniİçerik)
-        LLM_GW-->>Core: Sonuç: {status: "update", data: ...}
+    loop Her ilgili Prediction icin
+        Core->>LLM_GW: update_prediction(prompt, eskiDeger, yeniIcerik)
+        LLM_GW-->>Core: Sonuc: {status: "update", data: ...}
         
         alt status == "update"
-            Core->>DB: Prediction'ı güncelle
-            note over Core, DB: Bu aşama reaktif akışı tetikler.
+            Core->>DB: Prediction'i guncelle
+            note over Core, DB: Bu asama reaktif akisi tetikler.
         end
     end
 
-    Core->>DB: Güncellenen Prediction'lara bağlı<br>abone (subscribed) sorguları bul
+    Core->>DB: Guncellenen Prediction'lara bagli<br>abone (subscribed) sorgulari bul
     DB-->>Core: UserQuery nesneleri
 
-    loop Her abone UserQuery için
+    loop Her abone UserQuery icin
         Core->>Core: _assemble_final_answer(query)
-        note right of Core: Gerekirse LLM_GW aracılığıyla<br>yeni çeviri yapılır.
-        Core->>DB: UserQuery.final_answer ve<br>UserQuery.answer_last_updated'i güncelle
+        note right of Core: Gerekirse LLM_GW araciligiyla<br>yeni ceviri yapilir.
+        Core->>DB: UserQuery.final_answer ve<br>UserQuery.answer_last_updated'i guncelle
     end
 
     Actor->>Monitor: get_updated_answers_since(lastCheck)
-    Monitor->>DB: Belirtilen zamandan sonra güncellenen<br>abone sorguları getir
-    DB-->>Monitor: Güncel cevap listesi
-    Monitor-->>Actor: Güncel cevap listesi
+    Monitor->>DB: Belirtilen zamandan sonra guncellenen<br>abone sorgulari getir
+    DB-->>Monitor: Guncel cevap listesi
+    Monitor-->>Actor: Guncel cevap listesi
 ```
 
 ### 7\. Desteklenen Kullanıcı Sorgu Tipleri
