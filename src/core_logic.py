@@ -19,7 +19,6 @@ logger = logging.getLogger(__name__)
 #     score = get_cosine_similarity(text1, text2)
 #     logger.debug(f"Semantic similarity score: {score:.4f}, Threshold: {threshold}")
 #     return score >= threshold
-
 def _assemble_final_answer(db: Session, user_query: UserQuery) -> str:
     """
     LLM'den gelen yapısal "render planını" ve prediction verilerini işleyerek
@@ -98,14 +97,22 @@ def _assemble_final_answer(db: Session, user_query: UserQuery) -> str:
                 if isinstance(data_items, dict) and "error" in data_items:
                     final_answer_parts.append(empty_message)
                 elif isinstance(data_items, list) and len(data_items) > 0:
+                    
                     for item in data_items:
                         if isinstance(item, dict):
-                            formatted_item = item_template
-                            for key, value in item.items():
-                                formatted_item = formatted_item.replace(f"{{{{{key}}}}}", str(value))
-                            final_answer_parts.append(formatted_item)
+                            try:
+                                # str.format(**dictionary) metodu, sözlükteki anahtarları
+                                # şablondaki {anahtar} yer tutucularıyla doğrudan eşleştirir.
+                                # Bu yöntem, döngüyle tek tek replace yapmaktan çok daha güvenilirdir.
+                                formatted_item = item_template.format(**item)
+                                final_answer_parts.append(formatted_item)
+                            except KeyError as e:
+                                # Hata durumunda (örn: şablonda olup veride olmayan bir anahtar),
+                                # sorunu loglayıp ham şablonu ekleyerek programın çökmesini engelleriz.
+                                logger.warning(f"Şablon anahtarı {e} veri içinde bulunamadı. Ham şablon ekleniyor. Veri: {item}")
+                                final_answer_parts.append(item_template)
                         else:
-                            final_answer_parts.append(str(item)) 
+                            final_answer_parts.append(str(item))                            
                 else:
                     final_answer_parts.append(empty_message)
             else:
@@ -116,7 +123,7 @@ def _assemble_final_answer(db: Session, user_query: UserQuery) -> str:
     except Exception as e:
         logger.error(f"Error processing render plan for UserQuery ID {user_query.id}: {e}", exc_info=True)
         return "[**Cevap oluşturulurken şablon işleme hatası oluştu.** Lütfen sistem yöneticinizle iletişime geçin.]"
-
+    
 def _find_and_rerank_relevant_predictions(db: Session, summary: str, keywords: list[str], top_k: int = 10) -> list[int]:
     """
     Bir doküman için en alakalı Prediction'ları bulur (ön eleme + yeniden sıralama).
