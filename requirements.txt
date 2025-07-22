@@ -1,0 +1,11 @@
+# requirements.txt
+openai
+psycopg2-binary
+sqlalchemy
+chromadb
+sentence-transformers
+python-dotenv
+langchain
+python-frontmatter
+celery
+redis
