@@ -143,17 +143,47 @@ Aşağıdaki diyagram, yeni bir doküman geldiğinde bir abone sorgusunun nasıl
 
 ### 7\. Desteklenen Kullanıcı Sorgu Tipleri
 
-#### Olgusal Sorgular (Factual Queries) 📖
+####  Olgusal Sorgular (Factual Queries)
+Dokümanlarda doğrudan veya dolaylı olarak var olan gerçekleri ve verileri çıkarmayı hedefler.
 
-  * **Örnek:** `"İmar hakkı aktarımı nedir?"`
+* **Doğrudan Veri Çıkarımı:** Belirli bir bilgiyi net olarak bulur.
+    * **Örnek:** `"İmar hakkı aktarımı hangi kanun ile yasalaştı?"`
+* **Liste Oluşturma:** Bir konuyla ilgili maddeleri veya özellikleri listeler.
+    * **Örnek:** `"Yeni yasaya göre imar hakkı aktarımından kimler faydalanabilir?"`
+* **Tanımlama:** Bir kavramın veya terimin ne olduğunu açıklar.
+    * **Örnek:** `"Kamulaştırma Kanunu'na göre 'değer tespiti' ne demektir?"`
+* **Özetleme:** Bir dokümanın veya konunun ana fikirlerini yoğunlaştırır.
+    * **Örnek:** `"Kentsel dönüşümle ilgili son dokümanın özetini çıkar."`
 
-#### Çıkarımsal Sorgular (Inferential Queries) 🧠
+---
+####  Çıkarımsal Sorgular (Inferential Queries)
+Farklı doküman veya bilgi parçacıklarını birleştirerek mantıksal bir sonuç, karşılaştırma veya sentez yapılmasını gerektirir.
 
-  * **Örnek:** `"İmar hakkı aktarımı ile klasik kamulaştırma arasındaki avantajları karşılaştır."`
+* **Karşılaştırmalı Analiz:** İki veya daha fazla unsuru kıyaslar.
+    * **Örnek:** `"2019 öncesi ve sonrası kamulaştırma süreçleri arasındaki temel farklar nelerdir?"`
+* **Neden-Sonuç İlişkisi:** Olaylar arasında bir sebep-sonuç bağlantısı kurar.
+    * **Örnek:** `"Kentsel dönüşümün imar hakkı aktarımına dahil edilmesi, süreçlerin hızını nasıl etkiledi?"`
+* **Çok Adımlı Çıkarım (Multi-Hop):** Cevaba ulaşmak için birden fazla bilginin zincirleme olarak bulunmasını gerektirir.
+    * **Örnek:** `"Çevre ve Şehircilik Bakanlığı'nın yayınladığı son yönetmelikte adı geçen değerleme firmalarının yetkinlikleri nelerdir?"` (Bu sorgu önce yönetmeliği, sonra firmaları, sonra da o firmalarla ilgili başka dokümanları bulmayı gerektirebilir.)
 
-#### Prosedürel Sorgular (Procedural Queries) 📋
+---
+####  Trend ve Zamansal Analiz Sorguları (Temporal Analysis Queries)
+Sistemin **Proaktif RAG** yeteneği sayesinde, farklı zamanlarda yayınlanmış dokümanları analiz ederek bir konunun zaman içindeki değişimini sorgular.
 
-  * **Örnek:** `"İmar hakkı aktarımı için başvuru süreci hangi adımları içerir?"`
+* **Evrim ve Değişim:** Bir kavramın veya durumun zamanla nasıl geliştiğini analiz eder.
+    * **Örnek:** `"İmar hakkı aktarımı kavramı, ilk yasalaştığı 2024'ten 2025'teki kentsel dönüşüm güncellemesine kadar nasıl bir değişim gösterdi?"`
+* **Tarihsel Karşılaştırma:** Belirli iki tarih arasındaki durumu kıyaslar.
+    * **Örnek:** `"Aralık 2024 ile Temmuz 2025 arasında vatandaşların imar hakkı konusundaki hukuki kazanımlarında ne gibi farklılıklar oldu?"`
+
+---
+####  Prosedürel Sorgular (Procedural Queries)
+Bir işin veya sürecin "nasıl yapılacağını" adım adım öğrenmeyi amaçlar.
+
+* **Adım Adım Kılavuz:** Bir sürecin aşamalarını listeler.
+    * **Örnek:** `"İmar hakkı aktarımı için başvuru süreci hangi adımları içerir?"`
+* **Rol ve Sorumluluklar:** Bir süreçteki aktörlerin görevlerini sorgular.
+    * **Örnek:** `"Değer tespiti sürecinde bağımsız değerleme firmalarının sorumlulukları nelerdir?"`
+
 
 ### 8\. Uçtan Uca Simülasyon (`run_full_test.py`)
 

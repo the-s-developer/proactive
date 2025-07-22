@@ -142,17 +142,47 @@ sequenceDiagram
 
 ### 7\. Supported User Query Types
 
-#### Factual Queries 📖
+####  Factual Queries
+These queries aim to extract facts and data that exist directly or indirectly in the documents.
 
-  * **Example:** `"What is zoning right transfer?"`
+* **Direct Data Extraction:** Finds a specific piece of information.
+    * **Example:** `"Which law enacted the zoning right transfer?"`
+* **List Generation:** Lists items or features related to a topic.
+    * **Example:** `"According to the new law, who can benefit from the zoning right transfer?"`
+* **Definition:** Explains what a concept or term means.
+    * **Example:** `"What does 'value appraisal' mean according to the Expropriation Law?"`
+* **Summarization:** Condenses the main ideas of a document or topic.
+    * **Example:** `"Provide a summary of the latest document regarding urban transformation."`
 
-#### Inferential Queries 🧠
+---
+####  Inferential Queries
+These require combining different documents or pieces of information to form a logical conclusion, comparison, or synthesis.
 
-  * **Example:** `"Compare the advantages of zoning right transfer versus classic expropriation."`
+* **Comparative Analysis:** Compares two or more elements.
+    * **Example:** `"What are the main differences between the expropriation processes before and after 2019?"`
+* **Causal Reasoning:** Establishes a cause-and-effect link between events.
+    * **Example:** `"How did including urban transformation in the zoning right transfer affect the speed of the processes?"`
+* **Multi-Hop Reasoning:** Requires finding multiple pieces of information in a chain to reach the answer.
+    * **Example:** `"What are the competencies of the appraisal firms mentioned in the latest regulation published by the Ministry of Environment and Urbanization?"` (This may require finding the regulation, then the firms, then other documents about those firms.)
 
-#### Procedural Queries 📋
+---
+####  Trend and Temporal Analysis Queries
+Thanks to the system's **Proactive RAG** capability, these queries analyze how a topic has changed over time by using documents published at different dates.
 
-  * **Example:** `"What are the steps in the application process for zoning right transfer?"`
+* **Evolution and Change:** Analyzes how a concept or situation has developed over time.
+    * **Example:** `"How did the concept of zoning right transfer evolve from its initial legislation in 2024 to the urban transformation update in 2025?"`
+* **Historical Comparison:** Compares the situation between two specific dates.
+    * **Example:** `"What were the differences in the legal gains for citizens regarding zoning rights between December 2024 and July 2025?"`
+
+---
+####  Procedural Queries
+These aim to learn the step-by-step process of "how to do" something.
+
+* **Step-by-Step Guide:** Lists the stages of a process.
+    * **Example:** `"What steps does the application process for a zoning right transfer involve?"`
+* **Roles and Responsibilities:** Asks about the duties of actors in a process.
+    * **Example:** `"What are the responsibilities of independent appraisal firms during the value appraisal process?"`
+
 
 ### 8\. End-to-End Simulation (`run_full_test.py`)
 
