@@ -111,7 +111,7 @@ sequenceDiagram
     participant Monitor as answer_monitor.py
 
     Actor->>Core: handle_new_document(filePath)
-    note over Core: Dokumani DB'ye ve VStore'a kaydeder.
+    note over Core: Dokuman DB'ye ve VStore'a kaydedilir.
 
     Core->>VStore: find_similar_predictions(docMeta)
     VStore-->>Core: Ilgili Prediction ID'leri
@@ -121,27 +121,27 @@ sequenceDiagram
 
     loop Her ilgili Prediction icin
         Core->>LLM_GW: update_prediction(prompt, eskiDeger, yeniIcerik)
-        LLM_GW-->>Core: Sonuc: {status: "update", data: ...}
+        LLM_GW-->>Core: Guncelleme Sonucu (JSON)
         
         alt status == "update"
             Core->>DB: Prediction'i guncelle
-            note over Core, DB: Bu asama reaktif akisi tetikler.
+            note over Core, DB: Bu adim reaktif akisi tetikler.
         end
     end
 
-    Core->>DB: Guncellenen Prediction'lara bagli<br>abone (subscribed) sorgulari bul
+    Core->>DB: Guncellenen Prediction'lara bagli<br>abone sorgulari bul
     DB-->>Core: UserQuery nesneleri
 
     loop Her abone UserQuery icin
         Core->>Core: _assemble_final_answer(query)
-        note right of Core: Gerekirse LLM_GW araciligiyla<br>yeni ceviri yapilir.
-        Core->>DB: UserQuery.final_answer ve<br>UserQuery.answer_last_updated'i guncelle
+        note right of Core: Gerekirse LLM_GW ile<br>yeni ceviri yapilir.
+        Core->>DB: UserQuery'nin final_answer'ini guncelle
     end
 
     Actor->>Monitor: get_updated_answers_since(lastCheck)
-    Monitor->>DB: Belirtilen zamandan sonra guncellenen<br>abone sorgulari getir
-    DB-->>Monitor: Guncel cevap listesi
-    Monitor-->>Actor: Guncel cevap listesi
+    Monitor->>DB: Guncellenen abone sorgularini getir
+    DB-->>Monitor: Guncel cevaplar
+    Monitor-->>Actor: Guncel cevaplar
 ```
 
 ### 7\. Desteklenen Kullanıcı Sorgu Tipleri
