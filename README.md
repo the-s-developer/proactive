@@ -1,9 +1,6 @@
+## Proactive
 
-## Mimari ve Tasarım Detayları
-
-Bu doküman, sistemin arkasındaki temel tasarım kararlarını ve mimari prensipleri açıklar.
-
-### 1\. Çekirdek Felsefe: Proaktif RAG
+### 1\. Ardındaki Felsefe
 
 Geleneksel RAG (Retrieval-Augmented Generation) sistemleri statiktir; veri tabanı güncellendiğinde eski cevaplar yanlış kalmaya devam eder. **Proaktif RAG**, bu sorunu çözmek için tasarlanmıştır. Sisteme yeni bir doküman eklendiğinde:
 
@@ -19,7 +16,7 @@ Sistemin en yenilikçi yönlerinden biri, maliyet ve gecikmeyi azaltmak için me
 
 **Akış:**
 
-1.  Yeni bir kullanıcı sorgusu geldiğinde, sistem önce sorgunun anlamsal bir vektörünü oluşturur.
+1.  Yeni bir kullanıcı sorgusu geldiğinde, sistem önce sorgunun semantic bir vektörünü oluşturur.
 2.  Bu vektörü kullanarak ChromaDB'deki `predictions` koleksiyonunda anlamsal olarak en benzer mevcut görevleri bulur.
 3.  Bu "aday" görevler, ana LLM'e (örn. GPT-4) kullanıcı sorgusuyla birlikte sunulur.
 4.  LLM, bir "sistem mimarı" rolü üstlenir ve şu kararı verir: "Bu yeni sorguyu cevaplamak için mevcut adaylardan birini yeniden kullanabilir miyim, yoksa tamamen yeni bir `Prediction` görevi mi oluşturmalıyım?"
@@ -30,7 +27,7 @@ Sistemin en yenilikçi yönlerinden biri, maliyet ve gecikmeyi azaltmak için me
 Sistem, RAG ve güncelleme tespiti için dokümanların içeriğini değil, **anlam açısından zengin meta verilerini** kullanır:
 
   * **Meta Veri Odaklı Vektörleştirme**: Bir doküman sisteme eklendiğinde, `özeti (summary)`, `anahtar kelimeleri (keywords)` gibi meta verileri vektörleştirilerek ChromaDB'ye eklenir.
-  * **Bağlam Sağlama**: Bir `Prediction` görevi için bağlam gerektiğinde, bu meta veri vektörleri üzerinden en alakalı dokümanlar bulunur ve LLM'e bu dokümanların **tam içeriği** sağlanır.
+  * **Context Sağlama**: Bir `Prediction` görevi için context gerektiğinde, bu meta veri vektörleri üzerinden en alakalı dokümanlar bulunur ve LLM'e bu dokümanların **tam içeriği** sağlanır.
 
 ### 4\. Veritabanı Mimarisi ve Şeması
 
@@ -77,7 +74,7 @@ erDiagram
 
 #### ChromaDB: Vektör Veri Deposu
 
-  * **`documents` Koleksiyonu**: Doküman meta verilerinin (özet, anahtar kelimeler) anlamsal vektörlerini barındırır.
+  * **`documents` Koleksiyonu**: Doküman meta verilerinin (özet, anahtar kelimeler) embedd(semantic) vektörlerini barındırır.
   * **`predictions` Koleksiyonu**: `Prediction` prompt'larının ve anahtar kelimelerinin vektörlerini içerir.
 
 ### 5\. Prediction Yaşam Döngüsü ve Durum Yönetimi
