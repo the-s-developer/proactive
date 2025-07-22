@@ -102,45 +102,42 @@ The following diagram illustrates how a subscribed query is proactively updated 
 
 ```mermaid
 sequenceDiagram
-    participant Actor as External Actor
+    participant User as External Actor
     participant Core as core_logic.py
     participant VStore as vector_store.py
-    participant LLM_GW as llm_gateway.py
+    participant LLM as llm_gateway.py
     participant DB as PostgreSQL
     participant Monitor as answer_monitor.py
 
-    Actor->>Core: handle_new_document(filePath)
-    note over Core: Saves document to DB and VStore.
-
+    User->>Core: handle_new_document(filePath)
+    Note over Core: Document is saved to DB and VStore.
     Core->>VStore: find_similar_predictions(docMeta)
     VStore-->>Core: Relevant Prediction IDs
-
     Core->>DB: Fetch Prediction objects
     DB-->>Core: Prediction objects
 
-    loop For each relevant Prediction
-        Core->>LLM_GW: update_prediction(prompt, oldValue, newContent)
-        LLM_GW-->>Core: Result: {status: "update", data: ...}
-        
-        alt status == "update"
+    loop each relevant Prediction
+        Core->>LLM: update_prediction(prompt, oldValue, newContent)
+        LLM-->>Core: Update Result (JSON)
+        alt Prediction updated
             Core->>DB: Update Prediction
-            note over Core, DB: This triggers the reactive flow.
+            Note over Core, DB: Triggers the reactive flow
         end
     end
 
-    Core->>DB: Find subscribed queries linked<br>to updated Predictions
+    Core->>DB: Find subscribed queries linked to updated Predictions
     DB-->>Core: UserQuery objects
 
-    loop For each subscribed UserQuery
-        Core->>Core: _assemble_final_answer(query)
-        note right of Core: New translation via LLM_GW<br>is performed if needed.
-        Core->>DB: Update UserQuery.final_answer &<br>UserQuery.answer_last_updated
+    loop each subscribed UserQuery
+        Core->>Core: assemble_final_answer(query)
+        Note right of Core: If needed, translation via LLM.
+        Core->>DB: Update final_answer
     end
 
-    Actor->>Monitor: get_updated_answers_since(lastCheck)
-    Monitor->>DB: Fetch subscribed queries updated<br>after the specified time
-    DB-->>Monitor: List of updated answers
-    Monitor-->>Actor: List of updated answers
+    User->>Monitor: get_updated_answers_since(lastCheck)
+    Monitor->>DB: Fetch updated subscribed queries
+    DB-->>Monitor: Updated answers
+    Monitor-->>User: Updated answers
 ```
 
 ### 7\. Supported User Query Types
