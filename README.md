@@ -1,39 +1,60 @@
 ## Proactive
 
-### 1\. Ardındaki Felsefe
+### 1. Core Philosophy
 
-Geleneksel RAG (Retrieval-Augmented Generation) sistemleri statiktir; veri tabanı güncellendiğinde eski cevaplar yanlış kalmaya devam eder. **Proaktif RAG**, bu sorunu çözmek için tasarlanmıştır. Sisteme yeni bir doküman eklendiğinde:
+Traditional Retrieval-Augmented Generation (RAG) systems are inherently static. When the underlying knowledge base is updated, previously generated answers often become outdated. **Proactive RAG** addresses this limitation by continuously keeping answers synchronized with new information.
 
-1.  Bu yeni dokümanın içeriği, mevcut tüm **aktif `Prediction`** (bilgi çıkarma görevleri) ile anlamsal olarak karşılaştırılır.
-2.  Eğer anlamlı bir örtüşme bulunursa, ilgili `Prediction` görevi yeni bilgiyle yeniden çalıştırılır ve sonucu güncellenir.
-3.  Bu `Prediction`'a bağlı olan tüm **abone olunmuş (`subscribed`)** kullanıcı sorgularının nihai cevapları da otomatik olarak yeniden oluşturulur.
+Whenever a new document is added to the system:
 
-Bu yaklaşım, sistemin zamanla kendi kendini "iyileştirmesini" ve her zaman güncel kalmasını sağlar.
+1. The document's semantic metadata is compared against all active **`Prediction`** tasks.
+2. If a meaningful semantic match is found, the corresponding `Prediction` is re-executed using the newly available information.
+3. Every **subscribed** user query that depends on this `Prediction` is automatically regenerated, ensuring its final answer reflects the latest knowledge.
 
-### 2\. Maliyet Optimizasyonu: Akıllı Prediction Yeniden Kullanımı
+This architecture enables the system to continuously improve itself while maintaining up-to-date responses without requiring users to resubmit their queries.
 
-Sistemin en yenilikçi yönlerinden biri, maliyet ve gecikmeyi azaltmak için mevcut `Prediction` görevlerini akıllıca yeniden kullanmasıdır.
+---
 
-**Akış:**
+### 2. Cost Optimization Through Intelligent Prediction Reuse
 
-1.  Yeni bir kullanıcı sorgusu geldiğinde, sistem önce sorgunun semantic bir vektörünü oluşturur.
-2.  Bu vektörü kullanarak ChromaDB'deki `predictions` koleksiyonunda anlamsal olarak en benzer mevcut görevleri bulur.
-3.  Bu "aday" görevler, ana LLM'e (örn. GPT-4) kullanıcı sorgusuyla birlikte sunulur.
-4.  LLM, bir "sistem mimarı" rolü üstlenir ve şu kararı verir: "Bu yeni sorguyu cevaplamak için mevcut adaylardan birini yeniden kullanabilir miyim, yoksa tamamen yeni bir `Prediction` görevi mi oluşturmalıyım?"
-5.  Bu proaktif kontrol, anlamsal olarak aynı olan görevlerin tekrar tekrar oluşturulmasını ve çalıştırılmasını engelleyerek **maliyetleri ve gecikmeyi önemli ölçüde azaltır**.
+One of the system's key innovations is minimizing inference cost and latency by intelligently reusing existing `Prediction` tasks.
 
-### 3\. Veri İşleme Stratejisi
+**Workflow**
 
-Sistem, RAG ve güncelleme tespiti için dokümanların içeriğini değil, **anlam açısından zengin meta verilerini** kullanır:
+1. When a new user query arrives, the system generates its semantic embedding.
+2. The embedding is used to search the `predictions` collection in ChromaDB for semantically similar existing prediction tasks.
+3. The retrieved candidate predictions are provided to the primary LLM (e.g., GPT-4) together with the user's query.
+4. Acting as a reasoning planner, the LLM decides whether:
 
-  * **Meta Veri Odaklı Vektörleştirme**: Bir doküman sisteme eklendiğinde, `özeti (summary)`, `anahtar kelimeleri (keywords)` gibi meta verileri vektörleştirilerek ChromaDB'ye eklenir.
-  * **Context Sağlama**: Bir `Prediction` görevi için context gerektiğinde, bu meta veri vektörleri üzerinden en alakalı dokümanlar bulunur ve LLM'e bu dokümanların **tam içeriği** sağlanır.
+   * an existing prediction can be reused, or
+   * a completely new `Prediction` task should be created.
+5. This proactive deduplication prevents semantically equivalent predictions from being repeatedly created and executed, significantly reducing both operational cost and response latency.
 
-### 4\. Veritabanı Mimarisi ve Şeması
+---
 
-Sistem, yapısal veriler için **PostgreSQL** ve anlamsal vektör verileri için **ChromaDB** olmak üzere iki temel veritabanı üzerine kuruludur.
+### 3. Document Processing Strategy
 
-#### PostgreSQL: İlişkisel Veri Deposu
+Instead of embedding entire documents, the system relies on **information-rich metadata** for retrieval and update detection.
+
+* **Metadata-Based Vectorization**
+
+  * When a document is ingested, its metadata—such as summaries and extracted keywords—is embedded and stored in ChromaDB.
+
+* **Context Retrieval**
+
+  * During prediction execution, the metadata vectors are searched to identify the most relevant documents, after which the **complete document contents** are supplied to the LLM as context.
+
+This approach keeps the vector database lightweight while preserving access to complete source material during reasoning.
+
+---
+
+### 4. Database Architecture
+
+The system employs two complementary databases:
+
+* **PostgreSQL** for structured relational data.
+* **ChromaDB** for semantic vector search.
+
+#### PostgreSQL: Relational Storage
 
 ```mermaid
 erDiagram
@@ -46,6 +67,7 @@ erDiagram
         string final_answer
         datetime answer_last_updated
     }
+
     Prediction {
         int id PK
         string prediction_prompt UK
@@ -55,12 +77,14 @@ erDiagram
         json keywords
         string base_language_code
     }
+
     TemplatePredictionsLink {
         int id PK
         int query_id FK
         int prediction_id FK
         string placeholder_name
     }
+
     Document {
         int id PK
         string source_url UK
@@ -72,34 +96,51 @@ erDiagram
     Prediction ||--|{ TemplatePredictionsLink : "is linked by"
 ```
 
-#### ChromaDB: Vektör Veri Deposu
+#### ChromaDB: Vector Storage
 
-  * **`documents` Koleksiyonu**: Doküman meta verilerinin (özet, anahtar kelimeler) embedd(semantic) vektörlerini barındırır.
-  * **`predictions` Koleksiyonu**: `Prediction` prompt'larının ve anahtar kelimelerinin vektörlerini içerir.
+* **`documents` collection**
 
-### 5\. Prediction Yaşam Döngüsü ve Durum Yönetimi
+  * Stores embeddings generated from document metadata (summaries, keywords, etc.).
 
-Bir `Prediction` objesi, `status` alanı ile yönetilen bir yaşam döngüsüne sahiptir.
+* **`predictions` collection**
 
-  * **`FULFILLED` (Tamamlandı/Aktif):** Görev çalıştırıldı, bir sonuca sahip ve yeniden kullanıma ve reaktif güncellemelere açık.
-  * **`PENDING` (Beklemede):** Görev tanımlandı ancak henüz çalıştırılmadı.
-  * **`INACTIVE` (Pasif):** Görev artık aktif bir sorgu tarafından kullanılmıyor.
+  * Stores embeddings of prediction prompts and their semantic keywords for efficient prediction reuse.
 
-### 6\. Sorgu Abonelik Modeli ve Proaktif Bildirimler 🔔
+---
 
-Sistemin proaktif yeteneklerinin merkezinde **sorgu abonelik modeli** yer alır.
+### 5. Prediction Lifecycle
 
-  * **Abonelik Durumu**: Her `UserQuery` kaydı, varsayılan olarak `True` (abone) olan bir `is_subscribed` boole alanı içerir.
-  * **Kontrollü Güncellemeler**: Bir `Prediction` güncellendiğinde, sistem **sadece `is_subscribed = True` olan** `UserQuery` kayıtlarının `final_answer` alanını yeniden hesaplar.
-  * **Verimlilik ve Esneklik**: Bu model, bir kullanıcı veya sistemin artık canlı güncelleme gerektirmeyen bir sorgunun aboneliğinden çıkmasına olanak tanır (`update_user_query_subscription` fonksiyonu ile).
-  * **Bildirim Mekanizması**: `src/answer_monitor.py` modülü, bu modelle doğrudan entegre çalışır. Harici bir servis, `get_updated_answers_since` fonksiyonunu kullanarak belirli bir zamandan beri güncellenmiş ve **abone olunmuş** cevapları periyodik olarak sorgulayabilir.
+Each `Prediction` object is managed through a lifecycle defined by its `status`.
 
-#### Abonelik Akışının Sıra Diyagramı
+* **`FULFILLED`**
 
-Aşağıdaki diyagram, yeni bir doküman geldiğinde bir abone sorgusunun nasıl proaktif olarak güncellendiğini göstermektedir.
+  * The prediction has been executed successfully, contains a valid result, and is available for both reuse and future reactive updates.
+
+* **`PENDING`**
+
+  * The prediction has been created but has not yet been executed.
+
+* **`INACTIVE`**
+
+  * The prediction is no longer referenced by any active user query.
+
+---
+
+### 6. Query Subscription Model & Proactive Notifications 🔔
+
+The subscription model is the foundation of the system's proactive update mechanism.
+
+* Every `UserQuery` includes an `is_subscribed` flag, which defaults to **True**.
+* Whenever a prediction changes, the system regenerates answers **only for subscribed queries**.
+* Users (or applications) can unsubscribe from future automatic updates using the `update_user_query_subscription` function.
+* The `src/answer_monitor.py` module integrates directly with this workflow. External services can periodically call `get_updated_answers_since()` to retrieve all subscribed answers updated after a given timestamp.
+
+#### Subscription Workflow
+
+The following sequence diagram illustrates how a subscribed query is automatically refreshed when a new document is added.
 
 ```mermaid
- sequenceDiagram
+sequenceDiagram
     participant User as External Actor
     participant Core as core_logic.py
     participant VStore as vector_store.py
@@ -108,80 +149,142 @@ Aşağıdaki diyagram, yeni bir doküman geldiğinde bir abone sorgusunun nasıl
     participant Monitor as answer_monitor.py
 
     User->>Core: handle_new_document(filePath)
-    Note over Core: Document is saved to DB and VStore.
+
+    Note over Core: Document is stored in PostgreSQL and indexed in ChromaDB.
+
     Core->>VStore: find_similar_predictions(docMeta)
     VStore-->>Core: Relevant Prediction IDs
+
     Core->>DB: Fetch Prediction objects
     DB-->>Core: Prediction objects
 
-    loop each relevant Prediction
+    loop Each matching prediction
         Core->>LLM: update_prediction(prompt, oldValue, newContent)
-        LLM-->>Core: Update Result (JSON)
-        alt Prediction updated
+        LLM-->>Core: Updated prediction
+
+        alt Prediction changed
             Core->>DB: Update Prediction
-            Note over Core, DB: Triggers the reactive flow
         end
     end
 
-    Core->>DB: Find subscribed queries linked to updated Predictions
+    Core->>DB: Find subscribed queries linked to updated predictions
     DB-->>Core: UserQuery objects
 
-    loop each subscribed UserQuery
+    loop Each subscribed query
         Core->>Core: assemble_final_answer(query)
-        Note right of Core: If needed, translation via LLM.
+        Note right of Core: Translation performed if necessary.
         Core->>DB: Update final_answer
     end
 
     User->>Monitor: get_updated_answers_since(lastCheck)
-    Monitor->>DB: Fetch updated subscribed queries
+
+    Monitor->>DB: Fetch updated subscribed answers
     DB-->>Monitor: Updated answers
-    Monitor-->>User: Updated answers
+    Monitor-->>User: Return updated answers
 ```
 
-### 7\. Desteklenen Kullanıcı Sorgu Tipleri
+---
 
-####  Olgusal Sorgular (Factual Queries)
-Dokümanlarda doğrudan veya dolaylı olarak var olan gerçekleri ve verileri çıkarmayı hedefler.
+### 7. Supported Query Types
 
-* **Doğrudan Veri Çıkarımı:** Belirli bir bilgiyi net olarak bulur.
-    * **Örnek:** `"İmar hakkı aktarımı hangi kanun ile yasalaştı?"`
-* **Liste Oluşturma:** Bir konuyla ilgili maddeleri veya özellikleri listeler.
-    * **Örnek:** `"Yeni yasaya göre imar hakkı aktarımından kimler faydalanabilir?"`
-* **Tanımlama:** Bir kavramın veya terimin ne olduğunu açıklar.
-    * **Örnek:** `"Kamulaştırma Kanunu'na göre 'değer tespiti' ne demektir?"`
-* **Özetleme:** Bir dokümanın veya konunun ana fikirlerini yoğunlaştırır.
-    * **Örnek:** `"Kentsel dönüşümle ilgili son dokümanın özetini çıkar."`
+#### Factual Queries
+
+Extract factual information directly or indirectly contained within the document collection.
+
+**Direct Information Retrieval**
+
+Example:
+
+> "Which law introduced Transfer of Development Rights?"
+
+**List Generation**
+
+Example:
+
+> "Who is eligible for Transfer of Development Rights under the new legislation?"
+
+**Definition**
+
+Example:
+
+> "What does 'valuation assessment' mean according to the Expropriation Law?"
+
+**Summarization**
+
+Example:
+
+> "Summarize the latest document on urban transformation."
 
 ---
-####  Çıkarımsal Sorgular (Inferential Queries)
-Farklı doküman veya bilgi parçacıklarını birleştirerek mantıksal bir sonuç, karşılaştırma veya sentez yapılmasını gerektirir.
 
-* **Karşılaştırmalı Analiz:** İki veya daha fazla unsuru kıyaslar.
-    * **Örnek:** `"2019 öncesi ve sonrası kamulaştırma süreçleri arasındaki temel farklar nelerdir?"`
-* **Neden-Sonuç İlişkisi:** Olaylar arasında bir sebep-sonuç bağlantısı kurar.
-    * **Örnek:** `"Kentsel dönüşümün imar hakkı aktarımına dahil edilmesi, süreçlerin hızını nasıl etkiledi?"`
-* **Çok Adımlı Çıkarım (Multi-Hop):** Cevaba ulaşmak için birden fazla bilginin zincirleme olarak bulunmasını gerektirir.
-    * **Örnek:** `"Çevre ve Şehircilik Bakanlığı'nın yayınladığı son yönetmelikte adı geçen değerleme firmalarının yetkinlikleri nelerdir?"` (Bu sorgu önce yönetmeliği, sonra firmaları, sonra da o firmalarla ilgili başka dokümanları bulmayı gerektirebilir.)
+#### Inferential Queries
+
+Require reasoning across multiple documents or combining multiple pieces of evidence.
+
+**Comparative Analysis**
+
+Example:
+
+> "What are the major differences between expropriation procedures before and after 2019?"
+
+**Cause-and-Effect Analysis**
+
+Example:
+
+> "How has including urban transformation within Transfer of Development Rights affected approval timelines?"
+
+**Multi-Hop Reasoning**
+
+Example:
+
+> "What qualifications do the valuation firms mentioned in the latest Ministry regulation possess?"
 
 ---
-####  Trend ve Zamansal Analiz Sorguları (Temporal Analysis Queries)
-Sistemin **Proaktif RAG** yeteneği sayesinde, farklı zamanlarda yayınlanmış dokümanları analiz ederek bir konunun zaman içindeki değişimini sorgular.
 
-* **Evrim ve Değişim:** Bir kavramın veya durumun zamanla nasıl geliştiğini analiz eder.
-    * **Örnek:** `"İmar hakkı aktarımı kavramı, ilk yasalaştığı 2024'ten 2025'teki kentsel dönüşüm güncellemesine kadar nasıl bir değişim gösterdi?"`
-* **Tarihsel Karşılaştırma:** Belirli iki tarih arasındaki durumu kıyaslar.
-    * **Örnek:** `"Aralık 2024 ile Temmuz 2025 arasında vatandaşların imar hakkı konusundaki hukuki kazanımlarında ne gibi farklılıklar oldu?"`
+#### Temporal Analysis Queries
+
+Leverage Proactive RAG to analyze changes over time as new documents become available.
+
+**Evolution Analysis**
+
+Example:
+
+> "How has the concept of Transfer of Development Rights evolved from its introduction in 2024 to the urban transformation amendments in 2025?"
+
+**Historical Comparison**
+
+Example:
+
+> "How did citizens' legal rights regarding development rights change between December 2024 and July 2025?"
 
 ---
-####  Prosedürel Sorgular (Procedural Queries)
-Bir işin veya sürecin "nasıl yapılacağını" adım adım öğrenmeyi amaçlar.
 
-* **Adım Adım Kılavuz:** Bir sürecin aşamalarını listeler.
-    * **Örnek:** `"İmar hakkı aktarımı için başvuru süreci hangi adımları içerir?"`
-* **Rol ve Sorumluluklar:** Bir süreçteki aktörlerin görevlerini sorgular.
-    * **Örnek:** `"Değer tespiti sürecinde bağımsız değerleme firmalarının sorumlulukları nelerdir?"`
+#### Procedural Queries
 
+Explain processes and workflows step by step.
 
-### 8\. Uçtan Uca Simülasyon (`run_full_test.py`)
+**Step-by-Step Guides**
 
-Test betiği, sistemin nasıl çalıştığını adım adım gösterir: sıfırlama, veri yükleme, ilk sorgu, reaktif güncelleme testi ve doğrulama. Bu simülasyon, abone olunmuş sorguların yeni bilgiyle otomatik olarak nasıl güncellendiğini kanıtlar.
+Example:
+
+> "What are the application steps for Transfer of Development Rights?"
+
+**Roles and Responsibilities**
+
+Example:
+
+> "What are the responsibilities of independent valuation firms during the property valuation process?"
+
+---
+
+### 8. End-to-End Simulation (`run_full_test.py`)
+
+The test script demonstrates the complete lifecycle of the system:
+
+1. Environment reset
+2. Document ingestion
+3. Initial query execution
+4. Reactive update triggered by newly added documents
+5. Automatic regeneration and verification of subscribed answers
+
+The simulation verifies that subscribed queries are proactively refreshed whenever new relevant information enters the knowledge base.
